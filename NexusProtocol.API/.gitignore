@@ -1,0 +1,14 @@
+# .NET Core / Visual Studio .gitignore
+[Bb]in/
+[Oo]bj/
+*.rsuser
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+.vs/
+publish/
+x64/
+x86/
+[Ll]ogs/
+[Tt]emp/
