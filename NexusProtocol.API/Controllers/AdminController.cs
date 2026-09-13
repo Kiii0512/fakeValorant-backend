@@ -30,8 +30,6 @@ namespace NexusProtocol.API.Controllers
                 return BadRequest("Không có file nào được chọn.");
 
             var client = _httpFactory.CreateClient("supabase");
-
-            // Lấy host gốc (loại bỏ /rest/v1 nếu có trong BaseAddress)
             var rawBase = client.BaseAddress?.ToString().TrimEnd('/') ?? "";
             var rootOrigin = rawBase.Replace("/rest/v1", "").TrimEnd('/');
 
@@ -44,7 +42,6 @@ namespace NexusProtocol.API.Controllers
             var mediaType = string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType;
             content.Headers.ContentType = new MediaTypeHeaderValue(mediaType);
 
-            // Gửi chính xác đến endpoint Storage của Supabase
             var storageEndpoint = $"{rootOrigin}/storage/v1/object/{bucket}/{fileName}";
             var uploadResp = await client.PostAsync(storageEndpoint, content);
 
@@ -58,12 +55,12 @@ namespace NexusProtocol.API.Controllers
             return Ok(new { Url = publicUrl });
         }
 
+        // ===================== AGENTS =====================
         [HttpPost("agents")]
-        public async Task<IActionResult> CreateAgent([FromBody] CreateAgentDto dto)
+        public async Task<IActionResult> CreateOrUpdateAgent([FromBody] CreateAgentDto dto)
         {
             if (dto == null) return BadRequest();
             var client = _httpFactory.CreateClient("supabase");
-
             var agentId = string.IsNullOrWhiteSpace(dto.Id) ? Guid.NewGuid().ToString() : dto.Id.Trim().ToLower();
 
             var agentPayload = new
@@ -93,7 +90,6 @@ namespace NexusProtocol.API.Controllers
             if (dto.Abilities != null && dto.Abilities.Count > 0)
             {
                 await client.DeleteAsync($"abilities?agent_id=eq.{agentId}");
-
                 foreach (var a in dto.Abilities)
                 {
                     var abilityPayload = new
@@ -105,7 +101,6 @@ namespace NexusProtocol.API.Controllers
                         icon_url = a.IconUrl,
                         video_url = a.VideoUrl
                     };
-
                     await client.PostAsync("abilities", new StringContent(JsonSerializer.Serialize(abilityPayload), Encoding.UTF8, "application/json"));
                 }
             }
@@ -113,12 +108,38 @@ namespace NexusProtocol.API.Controllers
             return Ok(new { AgentId = agentId, Message = "Lưu đặc vụ thành công" });
         }
 
+        [HttpDelete("agents/{id}")]
+        public async Task<IActionResult> DeleteAgent(string id)
+        {
+            var client = _httpFactory.CreateClient("supabase");
+            await client.DeleteAsync($"abilities?agent_id=eq.{id}");
+            var resp = await client.DeleteAsync($"agents?id=eq.{id}");
+            if (!resp.IsSuccessStatusCode) return StatusCode((int)resp.StatusCode);
+            return Ok(new { Message = "Đã xóa đặc vụ thành công" });
+        }
+
+        [HttpPatch("agents/{id}/toggle-featured")]
+        public async Task<IActionResult> ToggleAgentFeatured(string id, [FromBody] JsonElement body)
+        {
+            var client = _httpFactory.CreateClient("supabase");
+            bool isFeatured = body.TryGetProperty("is_featured", out var val) && val.GetBoolean();
+
+            var patchPayload = new { is_featured = isFeatured };
+            var request = new HttpRequestMessage(HttpMethod.Patch, $"agents?id=eq.{id}")
+            {
+                Content = new StringContent(JsonSerializer.Serialize(patchPayload), Encoding.UTF8, "application/json")
+            };
+            var resp = await client.SendAsync(request);
+            if (!resp.IsSuccessStatusCode) return StatusCode((int)resp.StatusCode);
+            return Ok(new { Success = true, IsFeatured = isFeatured });
+        }
+
+        // ===================== MAPS =====================
         [HttpPost("maps")]
-        public async Task<IActionResult> CreateMap([FromBody] CreateMapDto dto)
+        public async Task<IActionResult> CreateOrUpdateMap([FromBody] CreateMapDto dto)
         {
             if (dto == null) return BadRequest();
             var client = _httpFactory.CreateClient("supabase");
-
             var mapId = string.IsNullOrWhiteSpace(dto.Id) ? Guid.NewGuid().ToString() : dto.Id.Trim().ToLower();
 
             var payload = new
@@ -148,32 +169,55 @@ namespace NexusProtocol.API.Controllers
             if (dto.Gallery != null && dto.Gallery.Count > 0)
             {
                 await client.DeleteAsync($"map_images?map_id=eq.{mapId}");
-
                 int order = 0;
                 foreach (var imgUrl in dto.Gallery)
                 {
                     if (string.IsNullOrWhiteSpace(imgUrl)) continue;
-
                     var imgPayload = new
                     {
                         map_id = mapId,
                         image_url = imgUrl,
                         display_order = order++
                     };
-
                     await client.PostAsync("map_images", new StringContent(JsonSerializer.Serialize(imgPayload), Encoding.UTF8, "application/json"));
                 }
             }
 
-            return Ok(new { MapId = mapId, Message = "Lưu bản đồ và thư viện ảnh thành công" });
+            return Ok(new { MapId = mapId, Message = "Lưu bản đồ thành công" });
         }
 
+        [HttpDelete("maps/{id}")]
+        public async Task<IActionResult> DeleteMap(string id)
+        {
+            var client = _httpFactory.CreateClient("supabase");
+            await client.DeleteAsync($"map_images?map_id=eq.{id}");
+            var resp = await client.DeleteAsync($"maps?id=eq.{id}");
+            if (!resp.IsSuccessStatusCode) return StatusCode((int)resp.StatusCode);
+            return Ok(new { Message = "Đã xóa bản đồ thành công" });
+        }
+
+        [HttpPatch("maps/{id}/toggle-rotation")]
+        public async Task<IActionResult> ToggleMapRotation(string id, [FromBody] JsonElement body)
+        {
+            var client = _httpFactory.CreateClient("supabase");
+            bool isFeatured = body.TryGetProperty("is_featured", out var val) && val.GetBoolean();
+
+            var patchPayload = new { is_featured = isFeatured };
+            var request = new HttpRequestMessage(HttpMethod.Patch, $"maps?id=eq.{id}")
+            {
+                Content = new StringContent(JsonSerializer.Serialize(patchPayload), Encoding.UTF8, "application/json")
+            };
+            var resp = await client.SendAsync(request);
+            if (!resp.IsSuccessStatusCode) return StatusCode((int)resp.StatusCode);
+            return Ok(new { Success = true, IsFeatured = isFeatured });
+        }
+
+        // ===================== WEAPONS =====================
         [HttpPost("weapons")]
-        public async Task<IActionResult> CreateWeapon([FromBody] CreateWeaponDto dto)
+        public async Task<IActionResult> CreateOrUpdateWeapon([FromBody] CreateWeaponDto dto)
         {
             if (dto == null) return BadRequest();
             var client = _httpFactory.CreateClient("supabase");
-
             var weaponId = string.IsNullOrWhiteSpace(dto.Id) ? Guid.NewGuid().ToString() : dto.Id.Trim().ToLower();
 
             var payload = new
@@ -211,7 +255,42 @@ namespace NexusProtocol.API.Controllers
                 return StatusCode((int)resp.StatusCode, new { error = err });
             }
 
-            return Ok(new { WeaponId = weaponId, Message = "Lưu thông tin vũ khí thành công" });
+            return Ok(new { WeaponId = weaponId, Message = "Lưu vũ khí thành công" });
+        }
+
+        [HttpDelete("weapons/{id}")]
+        public async Task<IActionResult> DeleteWeapon(string id)
+        {
+            var client = _httpFactory.CreateClient("supabase");
+            var resp = await client.DeleteAsync($"weapons?id=eq.{id}");
+            if (!resp.IsSuccessStatusCode) return StatusCode((int)resp.StatusCode);
+            return Ok(new { Message = "Đã xóa vũ khí thành công" });
+        }
+        // ===================== SITE SETTINGS =====================
+        [HttpGet("settings/hero-video")]
+        public async Task<IActionResult> GetHeroVideo([FromServices] NexusProtocol.API.Data.AppDbContext dbContext)
+        {
+            var setting = await dbContext.SiteSettings.FindAsync("hero_video_url");
+            var videoUrl = setting?.Value ?? "";
+            return Ok(new { Url = videoUrl });
+        }
+
+        [HttpPost("settings/hero-video")]
+        public async Task<IActionResult> UpdateHeroVideo([FromBody] JsonElement body, [FromServices] NexusProtocol.API.Data.AppDbContext dbContext)
+        {
+            var videoUrl = body.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
+            var setting = await dbContext.SiteSettings.FindAsync("hero_video_url");
+            if (setting == null)
+            {
+                setting = new NexusProtocol.API.Models.SiteSetting { Key = "hero_video_url", Value = videoUrl };
+                dbContext.SiteSettings.Add(setting);
+            }
+            else
+            {
+                setting.Value = videoUrl;
+            }
+            await dbContext.SaveChangesAsync();
+            return Ok(new { Message = "Cập nhật video nền thành công", Url = videoUrl });
         }
     }
 }

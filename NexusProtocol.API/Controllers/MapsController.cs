@@ -24,15 +24,12 @@ namespace NexusProtocol.API.Controllers
         public async Task<IActionResult> GetAll()
         {
             var client = _httpFactory.CreateClient("supabase");
-
-            // 1. Lấy danh sách bản đồ, sắp xếp mới nhất lên đầu
             var mapsResp = await client.GetAsync("maps?order=created_at.desc");
             if (!mapsResp.IsSuccessStatusCode) return StatusCode((int)mapsResp.StatusCode);
 
             var mapsJson = await mapsResp.Content.ReadAsStringAsync();
             var maps = JsonSerializer.Deserialize<List<MapModel>>(mapsJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new List<MapModel>();
 
-            // 2. Lấy toàn bộ ảnh album theo thứ tự display_order
             var imagesResp = await client.GetAsync("map_images?order=display_order.asc");
             var images = new List<JsonElement>();
             if (imagesResp.IsSuccessStatusCode)
@@ -41,27 +38,16 @@ namespace NexusProtocol.API.Controllers
                 images = JsonSerializer.Deserialize<List<JsonElement>>(imagesJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new List<JsonElement>();
             }
 
-            // 3. Ghép album ảnh vào từng bản đồ
             var result = maps.Select(m =>
             {
                 var mapGallery = images
-                    .Where(img =>
-                    {
-                        if (img.TryGetProperty("map_id", out var mid))
-                        {
-                            return string.Equals(mid.GetString()?.Trim(), m.Id?.Trim(), StringComparison.OrdinalIgnoreCase);
-                        }
-                        return false;
-                    })
+                    .Where(img => img.TryGetProperty("map_id", out var mid) && string.Equals(mid.GetString()?.Trim(), m.Id?.Trim(), StringComparison.OrdinalIgnoreCase))
                     .Select(img => img.TryGetProperty("image_url", out var url) ? url.GetString() : null)
                     .Where(url => !string.IsNullOrWhiteSpace(url))
                     .ToList();
 
-                // Nếu bảng map_images chưa có ảnh thì lấy ảnh chính image_url làm fallback
                 if (mapGallery.Count == 0 && !string.IsNullOrEmpty(m.ImageUrl))
-                {
                     mapGallery.Add(m.ImageUrl);
-                }
 
                 return new
                 {
@@ -80,11 +66,26 @@ namespace NexusProtocol.API.Controllers
             return Ok(result);
         }
 
+        [HttpGet("featured")]
+        public async Task<IActionResult> GetFeaturedRotation()
+        {
+            var client = _httpFactory.CreateClient("supabase");
+            // Lấy danh sách map đang bật cờ xoay tua
+            var mapsResp = await client.GetAsync("maps?is_featured=eq.true");
+            if (!mapsResp.IsSuccessStatusCode) return StatusCode((int)mapsResp.StatusCode);
+
+            var mapsJson = await mapsResp.Content.ReadAsStringAsync();
+            var maps = JsonSerializer.Deserialize<List<MapModel>>(mapsJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new List<MapModel>();
+
+            // Random 3 bản đồ bất kỳ mỗi lượt request
+            var randomThree = maps.OrderBy(_ => Guid.NewGuid()).Take(3).ToList();
+            return Ok(randomThree);
+        }
+
         [HttpGet("{id}")]
         public async Task<IActionResult> Get(string id)
         {
             var client = _httpFactory.CreateClient("supabase");
-
             var mapResp = await client.GetAsync($"maps?id=eq.{id}");
             if (!mapResp.IsSuccessStatusCode) return StatusCode((int)mapResp.StatusCode);
 
@@ -103,9 +104,7 @@ namespace NexusProtocol.API.Controllers
                 .ToList() ?? new List<string?>();
 
             if (gallery.Count == 0 && !string.IsNullOrEmpty(map.ImageUrl))
-            {
                 gallery.Add(map.ImageUrl);
-            }
 
             return Ok(new { Map = map, Gallery = gallery });
         }

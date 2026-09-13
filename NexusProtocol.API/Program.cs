@@ -1,6 +1,8 @@
 using System.Net.Http.Headers;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.EntityFrameworkCore;
+using NexusProtocol.API.Data;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -9,31 +11,34 @@ builder.Services.Configure<KestrelServerOptions>(options =>
 {
     options.Limits.MaxRequestBodySize = 100 * 1024 * 1024;
 });
-
 builder.Services.Configure<FormOptions>(options =>
 {
     options.MultipartBodyLengthLimit = 100 * 1024 * 1024;
 });
 
-// 2. Đăng ký Controllers & OpenAPI
+// 2. Đăng ký EF Core Npgsql DbContext
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("SupabasePostgres")));
+
+// 3. Đăng ký Controllers & OpenAPI
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 
-// 3. Cấu hình CORS
+// 4. Cấu hình CORS
 builder.Services.AddCors(p => p.AddDefaultPolicy(b =>
     b.AllowAnyOrigin()
      .AllowAnyHeader()
      .AllowAnyMethod()));
 
-// 4. Đọc thông số Supabase
+// 5. Đọc thông số Supabase
 var supabaseUrl = (builder.Configuration.GetSection("Supabase")["Url"] ?? string.Empty).TrimEnd('/');
 var supabaseKey = builder.Configuration.GetSection("Supabase")["Key"] ?? string.Empty;
 
-// 5. Đăng ký Supabase Client
+// 6. Đăng ký Supabase Client
 var supabaseOptions = new Supabase.SupabaseOptions { AutoRefreshToken = true, AutoConnectRealtime = true };
 builder.Services.AddScoped(_ => new Supabase.Client(supabaseUrl, supabaseKey, supabaseOptions));
 
-// 6. Đăng ký Named HttpClient kết nối Supabase REST API
+// 7. Đăng ký Named HttpClient kết nối Supabase REST API
 builder.Services.AddHttpClient("supabase", client =>
 {
     if (!string.IsNullOrWhiteSpace(supabaseUrl))
@@ -50,7 +55,21 @@ builder.Services.AddHttpClient("supabase", client =>
 
 var app = builder.Build();
 
-// 7. Pipeline cấu hình
+// 8. Tự động áp dụng Migration khi server khởi động (Tùy chọn tiện ích cho nhóm)
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    try
+    {
+        db.Database.Migrate();
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[EF Core Migration Warning]: {ex.Message}");
+    }
+}
+
+// 9. Pipeline cấu hình
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
@@ -59,7 +78,7 @@ if (app.Environment.IsDevelopment())
 app.UseCors();
 app.UseAuthorization();
 
-// 8. Ánh xạ Controller routes
+// 10. Ánh xạ Controller routes
 app.MapControllers();
 
 app.Run();
