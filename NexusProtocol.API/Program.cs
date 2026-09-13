@@ -11,20 +11,20 @@ builder.Services.Configure<KestrelServerOptions>(options =>
 {
     options.Limits.MaxRequestBodySize = 100 * 1024 * 1024;
 });
-
 builder.Services.Configure<FormOptions>(options =>
 {
     options.MultipartBodyLengthLimit = 100 * 1024 * 1024;
 });
 
-// 2. Cấu hình CORS - Cho phép mọi Origin, Method, Header
+// 2. Cấu hình CORS - Cho phép mọi Origin linh hoạt (hỗ trợ cả Vercel và credentials)
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", policy =>
     {
-        policy.AllowAnyOrigin()
+        policy.SetIsOriginAllowed(_ => true)
               .AllowAnyHeader()
-              .AllowAnyMethod();
+              .AllowAnyMethod()
+              .AllowCredentials();
     });
 });
 
@@ -78,11 +78,21 @@ using (var scope = app.Services.CreateScope())
 // 9. Pipeline Middleware sắp xếp đúng chuẩn ASP.NET Core
 app.UseRouting();
 
-// CORS bắt buộc phải nằm giữa UseRouting và UseAuthorization
+// CORS đặt ngay sau UseRouting và trước UseAuthorization
 app.UseCors("AllowAll");
 
-app.UseAuthorization();
+// Middleware phản hồi nhanh cho các preflight request (OPTIONS) từ trình duyệt
+app.Use(async (context, next) =>
+{
+    if (context.Request.Method == HttpMethods.Options)
+    {
+        context.Response.StatusCode = StatusCodes.Status200OK;
+        return;
+    }
+    await next();
+});
 
+app.UseAuthorization();
 app.MapOpenApi();
 
 // 10. Ánh xạ Controller và áp dụng CORS policy
