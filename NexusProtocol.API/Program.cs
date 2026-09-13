@@ -17,15 +17,7 @@ builder.Services.Configure<FormOptions>(options =>
     options.MultipartBodyLengthLimit = 100 * 1024 * 1024;
 });
 
-// 2. Đăng ký EF Core Npgsql DbContext
-builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("SupabasePostgres")));
-
-// 3. Đăng ký Controllers & OpenAPI
-builder.Services.AddControllers();
-builder.Services.AddOpenApi();
-
-// 4. Cấu hình CORS - Cho phép mọi Origin, Header, Method khi gọi từ Vercel
+// 2. Cấu hình CORS - Cho phép mọi Origin, Method, Header
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", policy =>
@@ -35,6 +27,14 @@ builder.Services.AddCors(options =>
               .AllowAnyMethod();
     });
 });
+
+// 3. Đăng ký EF Core Npgsql DbContext
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("SupabasePostgres")));
+
+// 4. Đăng ký Controllers & OpenAPI
+builder.Services.AddControllers();
+builder.Services.AddOpenApi();
 
 // 5. Đọc thông số Supabase
 var supabaseUrl = (builder.Configuration.GetSection("Supabase")["Url"] ?? string.Empty).TrimEnd('/');
@@ -61,9 +61,6 @@ builder.Services.AddHttpClient("supabase", client =>
 
 var app = builder.Build();
 
-// Kích hoạt CORS ngay đầu pipeline
-app.UseCors("AllowAll");
-
 // 8. Tự động áp dụng Migration khi server khởi động
 using (var scope = app.Services.CreateScope())
 {
@@ -78,12 +75,17 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-// 9. Bật OpenAPI/Swagger cho cả Development lẫn Production để test nhanh trên Render
-app.MapOpenApi();
+// 9. Pipeline Middleware sắp xếp đúng chuẩn ASP.NET Core
+app.UseRouting();
+
+// CORS bắt buộc phải nằm giữa UseRouting và UseAuthorization
+app.UseCors("AllowAll");
 
 app.UseAuthorization();
 
-// 10. Ánh xạ Controller routes
-app.MapControllers();
+app.MapOpenApi();
+
+// 10. Ánh xạ Controller và áp dụng CORS policy
+app.MapControllers().RequireCors("AllowAll");
 
 app.Run();
