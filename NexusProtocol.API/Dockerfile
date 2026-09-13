@@ -1,22 +1,19 @@
-# Stage 1: Build với .NET SDK 10.0
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
-# Copy csproj và restore package
-COPY *.csproj ./
-RUN dotnet restore
+# Copy file sln và csproj vào đúng cấu trúc để cache restore layer
+COPY ["NexusProtocol.API/NexusProtocol.API.csproj", "NexusProtocol.API/"]
+RUN dotnet restore "NexusProtocol.API/NexusProtocol.API.csproj"
 
-# Copy toàn bộ source code và build Release
-COPY . ./
-RUN dotnet publish -c Release -o /app/publish
+# Copy toàn bộ code còn lại và build
+COPY . .
+WORKDIR "/src/NexusProtocol.API"
+RUN dotnet publish "NexusProtocol.API.csproj" -c Release -o /app/publish /p:UseAppHost=false
 
-# Stage 2: Chạy runtime với ASP.NET 10.0
+# Runtime stage
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
-COPY --from=build /app/publish .
-
-# Render gán cổng qua biến PORT
-ENV ASPNETCORE_URLS=http://+:8080
 EXPOSE 8080
-
+ENV ASPNETCORE_HTTP_PORTS=8080
+COPY --from=build /app/publish .
 ENTRYPOINT ["dotnet", "NexusProtocol.API.dll"]
