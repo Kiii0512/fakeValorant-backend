@@ -11,6 +11,7 @@ builder.Services.Configure<KestrelServerOptions>(options =>
 {
     options.Limits.MaxRequestBodySize = 100 * 1024 * 1024;
 });
+
 builder.Services.Configure<FormOptions>(options =>
 {
     options.MultipartBodyLengthLimit = 100 * 1024 * 1024;
@@ -24,11 +25,16 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 
-// 4. Cấu hình CORS
-builder.Services.AddCors(p => p.AddDefaultPolicy(b =>
-    b.AllowAnyOrigin()
-     .AllowAnyHeader()
-     .AllowAnyMethod()));
+// 4. Cấu hình CORS - Cho phép mọi Origin, Header, Method khi gọi từ Vercel
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowAll", policy =>
+    {
+        policy.AllowAnyOrigin()
+              .AllowAnyHeader()
+              .AllowAnyMethod();
+    });
+});
 
 // 5. Đọc thông số Supabase
 var supabaseUrl = (builder.Configuration.GetSection("Supabase")["Url"] ?? string.Empty).TrimEnd('/');
@@ -55,7 +61,10 @@ builder.Services.AddHttpClient("supabase", client =>
 
 var app = builder.Build();
 
-// 8. Tự động áp dụng Migration khi server khởi động (Tùy chọn tiện ích cho nhóm)
+// Kích hoạt CORS ngay đầu pipeline
+app.UseCors("AllowAll");
+
+// 8. Tự động áp dụng Migration khi server khởi động
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -69,13 +78,9 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-// 9. Pipeline cấu hình
-if (app.Environment.IsDevelopment())
-{
-    app.MapOpenApi();
-}
+// 9. Bật OpenAPI/Swagger cho cả Development lẫn Production để test nhanh trên Render
+app.MapOpenApi();
 
-app.UseCors();
 app.UseAuthorization();
 
 // 10. Ánh xạ Controller routes
