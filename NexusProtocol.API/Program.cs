@@ -6,7 +6,7 @@ using NexusProtocol.API.Data;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. Mở giới hạn kích thước nhận file cho Server (100 MB)
+// 1. Giới hạn dung lượng nhận request/upload
 builder.Services.Configure<KestrelServerOptions>(options =>
 {
     options.Limits.MaxRequestBodySize = 100 * 1024 * 1024;
@@ -16,15 +16,14 @@ builder.Services.Configure<FormOptions>(options =>
     options.MultipartBodyLengthLimit = 100 * 1024 * 1024;
 });
 
-// 2. Cấu hình CORS - Cho phép mọi Origin linh hoạt (hỗ trợ cả Vercel và credentials)
+// 2. Cấu hình CORS mở toàn quyền cho Vercel và Localhost
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowAll", policy =>
+    options.AddDefaultPolicy(policy =>
     {
-        policy.SetIsOriginAllowed(_ => true)
+        policy.SetIsOriginAllowed(origin => true)
               .AllowAnyHeader()
-              .AllowAnyMethod()
-              .AllowCredentials();
+              .AllowAnyMethod();
     });
 });
 
@@ -61,7 +60,24 @@ builder.Services.AddHttpClient("supabase", client =>
 
 var app = builder.Build();
 
-// 8. Tự động áp dụng Migration khi server khởi động
+// 8. ĐẶT CORS Ở LỚP ĐẦU TIÊN (Trước cả Routing và Exception)
+app.UseCors();
+
+// Phản hồi lập tức mã 200 cho preflight request OPTIONS
+app.Use(async (context, next) =>
+{
+    if (HttpMethods.IsOptions(context.Request.Method))
+    {
+        context.Response.Headers.Append("Access-Control-Allow-Origin", context.Request.Headers["Origin"].ToString());
+        context.Response.Headers.Append("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        context.Response.Headers.Append("Access-Control-Allow-Headers", "*");
+        context.Response.StatusCode = StatusCodes.Status200OK;
+        return;
+    }
+    await next();
+});
+
+// 9. Tự động áp dụng Migration khi server khởi động
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -75,27 +91,11 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-// 9. Pipeline Middleware sắp xếp đúng chuẩn ASP.NET Core
 app.UseRouting();
-
-// CORS đặt ngay sau UseRouting và trước UseAuthorization
-app.UseCors("AllowAll");
-
-// Middleware phản hồi nhanh cho các preflight request (OPTIONS) từ trình duyệt
-app.Use(async (context, next) =>
-{
-    if (context.Request.Method == HttpMethods.Options)
-    {
-        context.Response.StatusCode = StatusCodes.Status200OK;
-        return;
-    }
-    await next();
-});
-
 app.UseAuthorization();
 app.MapOpenApi();
 
-// 10. Ánh xạ Controller và áp dụng CORS policy
-app.MapControllers().RequireCors("AllowAll");
+// 10. Ánh xạ Controller
+app.MapControllers();
 
 app.Run();
