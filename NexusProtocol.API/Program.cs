@@ -6,7 +6,7 @@ using NexusProtocol.API.Data;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. Giới hạn dung lượng nhận request/upload
+// 1. Giới hạn dung lượng nhận request/upload (100 MB)
 builder.Services.Configure<KestrelServerOptions>(options =>
 {
     options.Limits.MaxRequestBodySize = 100 * 1024 * 1024;
@@ -21,15 +21,24 @@ builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        policy.SetIsOriginAllowed(origin => true)
+        policy.SetIsOriginAllowed(_ => true)
               .AllowAnyHeader()
               .AllowAnyMethod();
     });
 });
 
-// 3. Đăng ký EF Core Npgsql DbContext
+// 3. Đăng ký EF Core Npgsql DbContext với chiến lược Retry tự động chống Timeout
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("SupabasePostgres")));
+    options.UseNpgsql(
+        builder.Configuration.GetConnectionString("SupabasePostgres"),
+        npgsqlOptions =>
+        {
+            npgsqlOptions.EnableRetryOnFailure(
+                maxRetryCount: 5,
+                maxRetryDelay: TimeSpan.FromSeconds(5),
+                errorCodesToAdd: null);
+            npgsqlOptions.CommandTimeout(60);
+        }));
 
 // 4. Đăng ký Controllers & OpenAPI
 builder.Services.AddControllers();
@@ -60,7 +69,7 @@ builder.Services.AddHttpClient("supabase", client =>
 
 var app = builder.Build();
 
-// 8. ĐẶT CORS Ở LỚP ĐẦU TIÊN (Trước cả Routing và Exception)
+// 8. ĐẶT CORS Ở LỚP ĐẦU TIÊN
 app.UseCors();
 
 // Phản hồi lập tức mã 200 cho preflight request OPTIONS
@@ -75,6 +84,23 @@ app.Use(async (context, next) =>
         return;
     }
     await next();
+});
+
+// Bắt lỗi toàn cục để luôn trả về header CORS kèm nội dung lỗi cụ thể nếu database gặp sự cố
+app.Use(async (context, next) =>
+{
+    try
+    {
+        await next();
+    }
+    catch (Exception ex)
+    {
+        context.Response.Headers["Access-Control-Allow-Origin"] = "*";
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        context.Response.ContentType = "application/json";
+        var errorObj = new { message = ex.Message, detail = ex.InnerException?.Message };
+        await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(errorObj));
+    }
 });
 
 // 9. Tự động áp dụng Migration khi server khởi động
